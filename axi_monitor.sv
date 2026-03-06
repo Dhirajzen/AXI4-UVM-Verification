@@ -51,22 +51,24 @@ class axi_monitor extends uvm_component;
         wr_i = 0;
       end
 
-      // W accept
-      if (wr_inflight && (vif.mon_cb.wvalid && vif.mon_cb.wready)) begin
+        // W accept
+        if (wr_inflight && (vif.mon_cb.wvalid && vif.mon_cb.wready)) begin
+        bit last_expected;  // <-- DECLARE FIRST in this begin/end block
+
         if (wr_i < wr_beats) begin
-          wr_tr.wdata_q[wr_i] = vif.mon_cb.wdata;
-          wr_tr.wstrb_q[wr_i] = vif.mon_cb.wstrb;
+            wr_tr.wdata_q[wr_i] = vif.mon_cb.wdata;
+            wr_tr.wstrb_q[wr_i] = vif.mon_cb.wstrb;
 
-          // Check WLAST position vs expected
-          bit last_expected = (wr_i == wr_beats-1);
-          if (vif.mon_cb.wlast !== last_expected) wr_tr.wlast_mismatch = 1;
+            last_expected = (wr_i == (wr_beats - 1));
+            if (vif.mon_cb.wlast !== last_expected)
+            wr_tr.wlast_mismatch = 1;
 
-          wr_i++;
+            wr_i++;
         end else begin
-          // extra beats beyond LEN+1
-          wr_tr.wlast_mismatch = 1;
+            // extra beats beyond LEN+1
+            wr_tr.wlast_mismatch = 1;
         end
-      end
+        end
 
       // B accept
       if (vif.mon_cb.bvalid && vif.mon_cb.bready) begin

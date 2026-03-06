@@ -41,26 +41,45 @@ class axi_ref_model extends uvm_object;
     return start_addr - (start_addr % boundary_bytes);
   endfunction
 
-  function bit [31:0] next_addr(bit [31:0] curr, bit [31:0] start,
-                                axi_burst_e burst,
-                                int unsigned boundary_bytes,
-                                int unsigned beat_bytes);
-    bit [31:0] base;
-    case (burst)
-      AXI_BURST_FIXED: return curr;
-      AXI_BURST_INCR : return curr + beat_bytes;
-      AXI_BURST_WRAP : begin
-        base = wrap_base(start, boundary_bytes);
-        bit [31:0] nxt = curr + beat_bytes;
-        if ((nxt - base) >= boundary_bytes) nxt = nxt - boundary_bytes;
-        return nxt;
-      end
-      default: return curr;
-    endcase
-  endfunction
+function bit [31:0] next_addr(
+  bit [31:0] curr, bit [31:0] start,
+  axi_burst_e burst,
+  int unsigned boundary_bytes,
+  int unsigned beat_bytes
+);
+  bit [31:0] base;
+  bit [31:0] nxt;
+
+  // default
+  nxt = curr;
+
+  case (burst)
+    AXI_BURST_FIXED: begin
+      nxt = curr;
+    end
+
+    AXI_BURST_INCR: begin
+      nxt = curr + beat_bytes;
+    end
+
+    AXI_BURST_WRAP: begin
+      base = wrap_base(start, boundary_bytes);
+      nxt  = curr + beat_bytes;
+      if ((nxt - base) >= boundary_bytes)
+        nxt = nxt - boundary_bytes;
+    end
+
+    default: begin
+      nxt = curr;
+    end
+  endcase
+
+  return nxt;
+endfunction
 
   function bit [31:0] read_word(bit [31:0] addr, bit [2:0] size);
-    bit [31:0] tmp = 32'h0;
+    bit [31:0] tmp;
+    tmp = 32'h0;
     case (size)
       3'd0: tmp[7:0] = ref_mem[addr];
       3'd1: begin
@@ -78,7 +97,8 @@ class axi_ref_model extends uvm_object;
   endfunction
 
   function void write_word(bit [31:0] addr, bit [2:0] size, bit [31:0] data, bit [3:0] strb);
-    int unsigned nbytes = bytes_per_beat(size);
+    int unsigned nbytes;
+    nbytes = bytes_per_beat(size);
     if (nbytes >= 1 && strb[0]) ref_mem[addr+0] = data[7:0];
     if (nbytes >= 2 && strb[1]) ref_mem[addr+1] = data[15:8];
     if (nbytes >= 3 && strb[2]) ref_mem[addr+2] = data[23:16];
