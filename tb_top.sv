@@ -67,12 +67,8 @@ module tb_top;
 
   // Hook up VIF to UVM
     initial begin
-        uvm_config_db#(virtual axi_if.master_mp)::set(
-        null, "uvm_test_top.env.agent.drv", "vif", axi_vif.master_mp
-        );
-        uvm_config_db#(virtual axi_if.monitor_mp)::set(
-        null, "uvm_test_top.env.agent.mon", "vif", axi_vif.monitor_mp
-        );
+        uvm_config_db#(virtual axi_if)::set(null, "uvm_test_top.env.agent.drv", "vif", axi_vif);
+        uvm_config_db#(virtual axi_if)::set(null, "uvm_test_top.env.agent.mon", "vif", axi_vif);
         run_test(); // allow +UVM_TESTNAME
     end
 endmodule

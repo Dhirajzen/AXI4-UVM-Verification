@@ -1,7 +1,7 @@
 class axi_driver extends uvm_driver #(axi_item);
   `uvm_component_utils(axi_driver)
 
-  virtual axi_if.master_mp vif;
+  virtual axi_if vif;
   axi_cfg cfg;
 
   function new(string name, uvm_component parent);
@@ -11,7 +11,7 @@ class axi_driver extends uvm_driver #(axi_item);
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
 
-    if (!uvm_config_db#(virtual axi_if.master_mp)::get(this, "", "vif", vif))
+    if (!uvm_config_db#(virtual axi_if)::get(this, "", "vif", vif))
       `uvm_fatal("NOVIF", "axi_driver: no vif")
 
     if (!uvm_config_db#(axi_cfg)::get(this, "", "cfg", cfg))
@@ -130,35 +130,36 @@ endtask
   // -------------------------
   // Read transaction
   // -------------------------
- task drive_read(axi_item tr);
-  int unsigned beats;
-  beats = tr.beats_total();
+  task drive_read(axi_item tr);
+    int unsigned beats;
+    beats = tr.beats_total();
 
-  // Drive AR
-  vif.drv_cb.arid    <= tr.id;
-  vif.drv_cb.araddr  <= tr.addr;
-  vif.drv_cb.arlen   <= tr.len;
-  vif.drv_cb.arsize  <= tr.size;
-  vif.drv_cb.arburst <= tr.burst;
-  vif.drv_cb.arvalid <= 1;
+    // AR handshake
+    vif.drv_cb.arid    <= tr.id;
+    vif.drv_cb.araddr  <= tr.addr;
+    vif.drv_cb.arlen   <= tr.len;
+    vif.drv_cb.arsize  <= tr.size;
+    vif.drv_cb.arburst <= tr.burst;
+    vif.drv_cb.arvalid <= 1;
 
-  do @(posedge vif.clk); while (!(vif.resetn && vif.arvalid && vif.arready));
-  vif.drv_cb.arvalid <= 0;
+    do @(vif.drv_cb); while (!vif.drv_cb.arready || !vif.drv_cb.resetn);
+    vif.drv_cb.arvalid <= 0;
 
-  // Collect R beats
-  tr.got_rid_q.delete();
-  tr.got_rdata_q.delete();
-  tr.got_rresp_q.delete();
-  tr.got_rlast_q.delete();
+    // R beats (collect until RLAST seen on handshake)
+    tr.got_rid_q.delete();
+    tr.got_rdata_q.delete();
+    tr.got_rresp_q.delete();
+    tr.got_rlast_q.delete();
 
-  for (int unsigned i=0; i<beats; i++) begin
-    do @(posedge vif.clk); while (!(vif.resetn && vif.rvalid && vif.rready));
-    tr.got_rid_q.push_back(vif.rid);
-    tr.got_rdata_q.push_back(vif.rdata);
-    tr.got_rresp_q.push_back(vif.rresp);
-    tr.got_rlast_q.push_back(vif.rlast);
-    if (vif.rlast) break;
-  end
-endtask
+    for (int unsigned i=0; i<beats; i++) begin
+      // wait handshake (rvalid && rready)
+      do @(vif.drv_cb); while (!(vif.drv_cb.rvalid && vif.drv_cb.rready) || !vif.drv_cb.resetn);
+      tr.got_rid_q.push_back(vif.drv_cb.rid);
+      tr.got_rdata_q.push_back(vif.drv_cb.rdata);
+      tr.got_rresp_q.push_back(vif.drv_cb.rresp);
+      tr.got_rlast_q.push_back(vif.drv_cb.rlast);
+      if (vif.drv_cb.rlast) break;
+    end
+  endtask
 
 endclass

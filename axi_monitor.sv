@@ -1,7 +1,7 @@
 class axi_monitor extends uvm_component;
   `uvm_component_utils(axi_monitor)
 
-  virtual axi_if.monitor_mp vif;
+  virtual axi_if vif;
   uvm_analysis_port #(axi_item) ap;
 
   bit          wr_inflight, rd_inflight;
@@ -16,7 +16,7 @@ class axi_monitor extends uvm_component;
 
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-    if (!uvm_config_db#(virtual axi_if.monitor_mp)::get(this, "", "vif", vif))
+    if (!uvm_config_db#(virtual axi_if)::get(this, "", "vif", vif))
       `uvm_fatal("NOVIF", "axi_monitor: no vif")
   endfunction
 
