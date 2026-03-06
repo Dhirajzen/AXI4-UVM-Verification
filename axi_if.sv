@@ -46,7 +46,7 @@ interface axi_if (input logic clk);
   // Clocking blocks
   // -------------------------
   clocking drv_cb @(posedge clk);
-    default input #1step output #1step;
+    default input #0 output #0;
     // Drive (master)
     output awvalid, awid, awlen, awsize, awaddr, awburst;
     output wvalid, wid, wdata, wstrb, wlast;
@@ -64,7 +64,7 @@ interface axi_if (input logic clk);
   endclocking
 
   clocking mon_cb @(posedge clk);
-    default input #1step output #1step;
+    default input #0 output #0;
     input resetn;
 
     input awvalid, awready, awid, awlen, awsize, awaddr, awburst;

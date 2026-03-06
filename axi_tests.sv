@@ -30,7 +30,7 @@ class axi_smoke_test extends axi_base_test;
     phase.raise_objection(this);
 
     // turn on some backpressure after smoke passes
-    env.cfg.ready_policy = READY_RANDOM;
+    cfg.ready_policy = READY_ALWAYS;
 
     seq = axi_smoke_seq::type_id::create("seq");
     seq.start(env.agent.seqr);
