@@ -90,75 +90,75 @@ class axi_driver extends uvm_driver #(axi_item);
   // -------------------------
   // Write transaction
   // -------------------------
-  task drive_write(axi_item tr);
-    int unsigned beats;
-    beats = tr.beats_total();
+ task drive_write(axi_item tr);
+  int unsigned beats;
+  beats = tr.beats_total();
 
-    // AW handshake
-    vif.drv_cb.awid    <= tr.id;
-    vif.drv_cb.awaddr  <= tr.addr;
-    vif.drv_cb.awlen   <= tr.len;
-    vif.drv_cb.awsize  <= tr.size;
-    vif.drv_cb.awburst <= tr.burst;
-    vif.drv_cb.awvalid <= 1;
+  // Drive AW
+  vif.drv_cb.awid    <= tr.id;
+  vif.drv_cb.awaddr  <= tr.addr;
+  vif.drv_cb.awlen   <= tr.len;
+  vif.drv_cb.awsize  <= tr.size;
+  vif.drv_cb.awburst <= tr.burst;
+  vif.drv_cb.awvalid <= 1;
 
-    do @(vif.drv_cb); while (!vif.drv_cb.awready || !vif.drv_cb.resetn);
-    // handshake occurred this cycle (awvalid was high)
-    vif.drv_cb.awvalid <= 0;
+  // Wait for AW handshake on posedge (raw signals)
+  do @(posedge vif.clk); while (!(vif.resetn && vif.awvalid && vif.awready));
+  vif.drv_cb.awvalid <= 0;
 
-    // W beats
-    for (int unsigned i=0; i<beats; i++) begin
-      bit last = (i == beats-1);
+  // Drive W beats
+  for (int unsigned i=0; i<beats; i++) begin
+    bit last;
+    last = (i == beats-1);
 
-      vif.drv_cb.wid    <= tr.id; // keep consistent (AXI3-style port)
-      vif.drv_cb.wdata  <= tr.wdata_q[i];
-      vif.drv_cb.wstrb  <= tr.wstrb_q[i];
-      vif.drv_cb.wlast  <= last;
-      vif.drv_cb.wvalid <= 1;
+    vif.drv_cb.wid    <= tr.id;
+    vif.drv_cb.wdata  <= tr.wdata_q[i];
+    vif.drv_cb.wstrb  <= tr.wstrb_q[i];
+    vif.drv_cb.wlast  <= last;
+    vif.drv_cb.wvalid <= 1;
 
-      do @(vif.drv_cb); while (!vif.drv_cb.wready || !vif.drv_cb.resetn);
-      vif.drv_cb.wvalid <= 0;
-    end
+    do @(posedge vif.clk); while (!(vif.resetn && vif.wvalid && vif.wready));
+    vif.drv_cb.wvalid <= 0;
+  end
 
-    // B response handshake (wait until bvalid && bready)
-    do @(vif.drv_cb); while (!(vif.drv_cb.bvalid && vif.drv_cb.bready) || !vif.drv_cb.resetn);
-    tr.got_bid   = vif.drv_cb.bid;
-    tr.got_bresp = vif.drv_cb.bresp;
-  endtask
+  // Wait for B handshake
+  do @(posedge vif.clk); while (!(vif.resetn && vif.bvalid && vif.bready));
+  tr.got_bid   = vif.bid;
+  tr.got_bresp = vif.bresp;
+endtask
 
   // -------------------------
   // Read transaction
   // -------------------------
-  task drive_read(axi_item tr);
-    int unsigned beats;
-    beats = tr.beats_total();
+ task drive_read(axi_item tr);
+  int unsigned beats;
+  beats = tr.beats_total();
 
-    // AR handshake
-    vif.drv_cb.arid    <= tr.id;
-    vif.drv_cb.araddr  <= tr.addr;
-    vif.drv_cb.arlen   <= tr.len;
-    vif.drv_cb.arsize  <= tr.size;
-    vif.drv_cb.arburst <= tr.burst;
-    vif.drv_cb.arvalid <= 1;
+  // Drive AR
+  vif.drv_cb.arid    <= tr.id;
+  vif.drv_cb.araddr  <= tr.addr;
+  vif.drv_cb.arlen   <= tr.len;
+  vif.drv_cb.arsize  <= tr.size;
+  vif.drv_cb.arburst <= tr.burst;
+  vif.drv_cb.arvalid <= 1;
 
-    do @(vif.drv_cb); while (!vif.drv_cb.arready || !vif.drv_cb.resetn);
-    vif.drv_cb.arvalid <= 0;
+  do @(posedge vif.clk); while (!(vif.resetn && vif.arvalid && vif.arready));
+  vif.drv_cb.arvalid <= 0;
 
-    // R beats (collect until RLAST seen on handshake)
-    tr.got_rid_q.delete();
-    tr.got_rdata_q.delete();
-    tr.got_rresp_q.delete();
-    tr.got_rlast_q.delete();
+  // Collect R beats
+  tr.got_rid_q.delete();
+  tr.got_rdata_q.delete();
+  tr.got_rresp_q.delete();
+  tr.got_rlast_q.delete();
 
-    for (int unsigned i=0; i<beats; i++) begin
-      // wait handshake (rvalid && rready)
-      do @(vif.drv_cb); while (!(vif.drv_cb.rvalid && vif.drv_cb.rready) || !vif.drv_cb.resetn);
-      tr.got_rid_q.push_back(vif.drv_cb.rid);
-      tr.got_rdata_q.push_back(vif.drv_cb.rdata);
-      tr.got_rresp_q.push_back(vif.drv_cb.rresp);
-      tr.got_rlast_q.push_back(vif.drv_cb.rlast);
-      if (vif.drv_cb.rlast) break;
-    end
-  endtask
+  for (int unsigned i=0; i<beats; i++) begin
+    do @(posedge vif.clk); while (!(vif.resetn && vif.rvalid && vif.rready));
+    tr.got_rid_q.push_back(vif.rid);
+    tr.got_rdata_q.push_back(vif.rdata);
+    tr.got_rresp_q.push_back(vif.rresp);
+    tr.got_rlast_q.push_back(vif.rlast);
+    if (vif.rlast) break;
+  end
+endtask
 
 endclass
