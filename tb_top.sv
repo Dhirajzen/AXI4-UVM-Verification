@@ -69,6 +69,6 @@ module tb_top;
   initial begin
     uvm_config_db#(virtual axi_if.master_mp)::set(null, "uvm_test_top.env.agent.drv", "vif", axi_vif);
     uvm_config_db#(virtual axi_if.monitor_mp)::set(null, "uvm_test_top.env.agent.mon", "vif", axi_vif);
-    run_test("axi_smoke_test");
+    run_test();
   end
 endmodule
