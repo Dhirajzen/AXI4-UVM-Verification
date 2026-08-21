@@ -1,0 +1,19 @@
+# Simulator build/run artifacts
+xcelium.d/
+xrun.history
+xrun.log
+xrun.key
+logs/
+waves.shm/
+cov_work/
+.simvision/
+*.diag
+*.err
+mdv.log
+*.vcd
+*.wlf
+transcript
+work/
+csrc/
+simv*
+ucli.key
