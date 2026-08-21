@@ -110,9 +110,17 @@ class axi_rand_seq extends axi_base_seq;
           addr + (32'd1 << size) <= 128;
         if (burst == AXI_BURST_INCR)
           addr + ((int'(len)+1) * (32'd1 << size)) <= 128;
-        if (burst == AXI_BURST_WRAP)
+        if (burst == AXI_BURST_WRAP) {
           (addr - (addr % ((int'(len)+1) * (32'd1 << size))))
             + ((int'(len)+1) * (32'd1 << size)) <= 128;
+          // AXI requires a WRAP burst's start address to be aligned to the
+          // transfer size. Without this, beat 0 (driven verbatim, before any
+          // wrap-around math applies) can straddle the wrap window's own
+          // edge and spill out of bounds even though the aligned window
+          // itself fits in memory - see axi_slave.sv's wrap_next_addr, which
+          // only wraps subsequent beats, never corrects the first one.
+          addr % (32'd1 << size) == 0;
+        }
         id inside {[0:15]};
         foreach (wstrb_q[i]) wstrb_q[i] inside {[0:15]};
       })
