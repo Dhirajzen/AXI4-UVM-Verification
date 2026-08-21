@@ -48,17 +48,22 @@ interface axi_if (input logic clk);
   // input #1step samples in the Preponed region: the driver and monitor see
   // exactly the values the DUT's flops sampled at the same edge, so handshake
   // detection can never race the DUT's non-blocking updates.
-  // The handshake signals the master drives (xVALID, xREADY) are declared
-  // inout so the BFM can also *sample* them and detect the acceptance edge
-  // the same way the DUT does.
+  // bready/rready are inout: a separate background task (drive_ready_policy)
+  // drives them continuously, so the transaction tasks must read back the
+  // current value. awvalid/wvalid/arvalid are output-only and stay that way
+  // on purpose - only the transaction task that drives one ever needs its
+  // value, so it's tracked locally; reading a signal back through the same
+  // clocking block in the same task that just wrote it is a self-observation
+  // pattern that can stall indefinitely instead of seeing the write.
   clocking drv_cb @(posedge clk);
     default input #1step output #0;
-    // Drive + sample (handshakes)
-    inout  awvalid, wvalid, arvalid, bready, rready;
-    // Drive only (payload)
+    // Drive only (this task is the only writer, so no read-back needed)
+    output awvalid, wvalid, arvalid;
     output awid, awlen, awsize, awaddr, awburst;
     output wid, wdata, wstrb, wlast;
     output arid, araddr, arlen, arsize, arburst;
+    // Drive + sample (driven by drive_ready_policy, read by the transaction tasks)
+    inout  bready, rready;
 
     // Sample (from slave/DUT)
     input  awready;

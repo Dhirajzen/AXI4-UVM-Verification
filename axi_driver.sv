@@ -111,8 +111,9 @@ class axi_driver extends uvm_driver #(axi_item);
   // -------------------------
   // All waits sample through drv_cb (input #1step = Preponed region), so the
   // BFM detects each handshake at exactly the edge the DUT accepts it.
-  // xVALID is an inout clockvar: sampling our own VALID together with the
-  // DUT's READY removes any off-by-one between driving and acceptance.
+  // xVALID is output-only and driven solely by this task, so its value is
+  // already known without reading it back - only the DUT's xREADY needs
+  // to be sampled.
   task drive_write(axi_item tr);
     int unsigned beats, send_beats;
     beats = tr.beats_total();
@@ -129,7 +130,7 @@ class axi_driver extends uvm_driver #(axi_item);
     vif.drv_cb.awburst <= tr.burst;
     vif.drv_cb.awvalid <= 1;
     do @(vif.drv_cb);
-    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awvalid && vif.drv_cb.awready));
+    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awready));
     vif.drv_cb.awvalid <= 0;
 
     // W beats (back-to-back: WVALID stays high between beats)
@@ -144,7 +145,7 @@ class axi_driver extends uvm_driver #(axi_item);
       vif.drv_cb.wvalid <= 1;
 
       do @(vif.drv_cb);
-      while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.wvalid && vif.drv_cb.wready));
+      while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.wready));
     end
     vif.drv_cb.wvalid <= 0;
     vif.drv_cb.wlast  <= 0;
@@ -171,7 +172,7 @@ class axi_driver extends uvm_driver #(axi_item);
     vif.drv_cb.arburst <= tr.burst;
     vif.drv_cb.arvalid <= 1;
     do @(vif.drv_cb);
-    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.arvalid && vif.drv_cb.arready));
+    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.arready));
     vif.drv_cb.arvalid <= 0;
 
     // R beats (collect until RLAST seen on handshake)
