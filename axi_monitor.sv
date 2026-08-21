@@ -46,6 +46,7 @@ class axi_monitor extends uvm_component;
         wr_tr.wdata_q = new[wr_beats];
         wr_tr.wstrb_q = new[wr_beats];
         wr_tr.wlast_mismatch = 0;
+        wr_tr.wid_mismatch   = 0;
 
         wr_inflight = 1;
         wr_i = 0;
@@ -54,6 +55,10 @@ class axi_monitor extends uvm_component;
         // W accept
         if (wr_inflight && (vif.mon_cb.wvalid && vif.mon_cb.wready)) begin
         bit last_expected;  // <-- DECLARE FIRST in this begin/end block
+
+        // AXI3-style WID must match the address-phase AWID
+        if (vif.mon_cb.wid !== wr_tr.id)
+            wr_tr.wid_mismatch = 1;
 
         if (wr_i < wr_beats) begin
             wr_tr.wdata_q[wr_i] = vif.mon_cb.wdata;
@@ -77,6 +82,8 @@ class axi_monitor extends uvm_component;
           wr_tr.got_bresp = vif.mon_cb.bresp;
           ap.write(wr_tr);
           wr_inflight = 0;
+        end else begin
+          `uvm_warning("AXI_MON", "B handshake observed with no write burst in flight")
         end
       end
 

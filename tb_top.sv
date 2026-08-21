@@ -9,17 +9,10 @@ module tb_top;
 
   axi_if axi_vif(.clk(clk));
 
-  // Reset
+  // Reset (master-side signals are initialized by the driver through its
+  // clocking block - driving them here too would multi-drive the interface)
   initial begin
     axi_vif.resetn = 0;
-
-    // default drives
-    axi_vif.awvalid = 0;
-    axi_vif.wvalid  = 0;
-    axi_vif.arvalid = 0;
-    axi_vif.bready  = 0;
-    axi_vif.rready  = 0;
-
     repeat (5) @(posedge clk);
     axi_vif.resetn = 1;
   end
@@ -65,10 +58,11 @@ module tb_top;
     .rready  (axi_vif.rready)
   );
 
-  // Hook up VIF to UVM
+  // Hook up VIF to UVM. Wildcard scope: the test, driver, and monitor all
+  // pick it up regardless of hierarchy names (hard-coded absolute paths
+  // silently break on any rename).
     initial begin
-        uvm_config_db#(virtual axi_if)::set(null, "uvm_test_top.env.agent.drv", "vif", axi_vif);
-        uvm_config_db#(virtual axi_if)::set(null, "uvm_test_top.env.agent.mon", "vif", axi_vif);
-        run_test(); // allow +UVM_TESTNAME
+        uvm_config_db#(virtual axi_if)::set(null, "*", "vif", axi_vif);
+        run_test("axi_smoke_test"); // default; +UVM_TESTNAME overrides
     end
 endmodule

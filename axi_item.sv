@@ -10,6 +10,10 @@ class axi_item extends uvm_sequence_item;
   rand bit [31:0]   wdata_q[];
   rand bit [3:0]    wstrb_q[];
 
+  // Error-injection knobs (directed tests only; default off)
+  bit        early_wlast;  // assert WLAST one beat early and stop the burst
+  bit        corrupt_wid;  // drive WID != AWID on the first data beat
+
   // Response / observed
   bit [3:0]  got_bid;
   bit [1:0]  got_bresp;
@@ -19,8 +23,9 @@ class axi_item extends uvm_sequence_item;
   bit [1:0]  got_rresp_q[$];
   bit        got_rlast_q[$];
 
-  // Helpful flags
+  // Helpful flags (set by monitor)
   bit        wlast_mismatch;
+  bit        wid_mismatch;
 
   `uvm_object_utils_begin(axi_item)
     `uvm_field_enum(axi_dir_e, dir, UVM_ALL_ON)
@@ -31,6 +36,8 @@ class axi_item extends uvm_sequence_item;
     `uvm_field_enum(axi_burst_e, burst, UVM_ALL_ON)
     `uvm_field_array_int(wdata_q, UVM_ALL_ON)
     `uvm_field_array_int(wstrb_q, UVM_ALL_ON)
+    `uvm_field_int(early_wlast, UVM_ALL_ON)
+    `uvm_field_int(corrupt_wid, UVM_ALL_ON)
     `uvm_field_int(got_bid,   UVM_ALL_ON)
     `uvm_field_int(got_bresp, UVM_ALL_ON)
     `uvm_field_queue_int(got_rid_q,   UVM_ALL_ON)
@@ -38,6 +45,7 @@ class axi_item extends uvm_sequence_item;
     `uvm_field_queue_int(got_rresp_q, UVM_ALL_ON)
     `uvm_field_queue_int(got_rlast_q, UVM_ALL_ON)
     `uvm_field_int(wlast_mismatch, UVM_ALL_ON)
+    `uvm_field_int(wid_mismatch, UVM_ALL_ON)
   `uvm_object_utils_end
 
   function new(string name="axi_item");
@@ -61,10 +69,13 @@ class axi_item extends uvm_sequence_item;
     burst inside {AXI_BURST_FIXED, AXI_BURST_INCR, AXI_BURST_WRAP};
   }
 
+  // NOTE: use (len+1) directly, not beats_total() — a function call inside a
+  // constraint is evaluated with the PRE-randomization value of len, which
+  // would size the payload arrays wrong on every randomize().
   constraint c_arrays {
     if (dir == AXI_WRITE) {
-      wdata_q.size() == beats_total();
-      wstrb_q.size() == beats_total();
+      wdata_q.size() == int'(len) + 1;
+      wstrb_q.size() == int'(len) + 1;
     } else {
       wdata_q.size() == 0;
       wstrb_q.size() == 0;

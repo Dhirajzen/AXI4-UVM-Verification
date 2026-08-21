@@ -8,9 +8,6 @@ class axi_cfg extends uvm_object;
   int unsigned    stall_min = 0;
   int unsigned    stall_max = 5;
 
-  // Scoreboard strictness
-  bit check_mem_on_error = 0;
-
   function new(string name="axi_cfg");
     super.new(name);
   endfunction

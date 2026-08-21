@@ -24,23 +24,42 @@ class axi_driver extends uvm_driver #(axi_item);
       drive_ready_policy();
     join_none
 
-    // init drives
-    vif.drv_cb.awvalid <= 0;
-    vif.drv_cb.wvalid  <= 0;
-    vif.drv_cb.arvalid <= 0;
-    vif.drv_cb.bready  <= 0;
-    vif.drv_cb.rready  <= 0;
+    clear_bus();
     @(vif.drv_cb);
 
     forever begin
       seq_item_port.get_next_item(tr);
-      if (tr.dir == AXI_WRITE) begin
-        drive_write(tr);
-      end else begin
-        drive_read(tr);
+
+      // Run the transfer, but abort it cleanly if reset asserts mid-flight —
+      // otherwise the BFM would wait forever for a handshake the freshly
+      // reset DUT will never complete.
+      fork begin
+        fork
+          begin
+            if (tr.dir == AXI_WRITE) drive_write(tr);
+            else                     drive_read(tr);
+          end
+          @(negedge vif.resetn);
+        join_any
+        disable fork;
+      end join
+
+      if (vif.resetn !== 1'b1) begin
+        `uvm_info("AXI_DRV", "Reset hit mid-transaction: aborting item, re-syncing", UVM_LOW)
+        clear_bus();
+        wait (vif.resetn === 1'b1);
+        repeat (2) @(vif.drv_cb);
       end
+
       seq_item_port.item_done();
     end
+  endtask
+
+  task clear_bus();
+    vif.drv_cb.awvalid <= 0;
+    vif.drv_cb.wvalid  <= 0;
+    vif.drv_cb.wlast   <= 0;
+    vif.drv_cb.arvalid <= 0;
   endtask
 
   // -------------------------
@@ -90,42 +109,52 @@ class axi_driver extends uvm_driver #(axi_item);
   // -------------------------
   // Write transaction
   // -------------------------
- task drive_write(axi_item tr);
-  int unsigned beats;
-  beats = tr.beats_total();
+  // All waits sample through drv_cb (input #1step = Preponed region), so the
+  // BFM detects each handshake at exactly the edge the DUT accepts it.
+  // xVALID is an inout clockvar: sampling our own VALID together with the
+  // DUT's READY removes any off-by-one between driving and acceptance.
+  task drive_write(axi_item tr);
+    int unsigned beats, send_beats;
+    beats = tr.beats_total();
+    // early_wlast: assert WLAST one beat early and stop the burst there.
+    // A compliant slave must still terminate the burst (with an error);
+    // see axi_early_wlast_test.
+    send_beats = (tr.early_wlast && beats > 1) ? beats - 1 : beats;
 
-  // Drive AW
-  vif.drv_cb.awid    <= tr.id;
-  vif.drv_cb.awaddr  <= tr.addr;
-  vif.drv_cb.awlen   <= tr.len;
-  vif.drv_cb.awsize  <= tr.size;
-  vif.drv_cb.awburst <= tr.burst;
-  vif.drv_cb.awvalid <= 1;
+    // AW handshake
+    vif.drv_cb.awid    <= tr.id;
+    vif.drv_cb.awaddr  <= tr.addr;
+    vif.drv_cb.awlen   <= tr.len;
+    vif.drv_cb.awsize  <= tr.size;
+    vif.drv_cb.awburst <= tr.burst;
+    vif.drv_cb.awvalid <= 1;
+    do @(vif.drv_cb);
+    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awvalid && vif.drv_cb.awready));
+    vif.drv_cb.awvalid <= 0;
 
-  // Wait for AW handshake on posedge (raw signals)
-  do @(posedge vif.clk); while (!(vif.resetn && vif.awvalid && vif.awready));
-  vif.drv_cb.awvalid <= 0;
+    // W beats (back-to-back: WVALID stays high between beats)
+    for (int unsigned i = 0; i < send_beats; i++) begin
+      bit last;
+      last = (i == send_beats - 1);
 
-  // Drive W beats
-  for (int unsigned i=0; i<beats; i++) begin
-    bit last;
-    last = (i == beats-1);
+      vif.drv_cb.wid    <= (tr.corrupt_wid && (i == 0)) ? (tr.id ^ 4'h1) : tr.id;
+      vif.drv_cb.wdata  <= tr.wdata_q[i];
+      vif.drv_cb.wstrb  <= tr.wstrb_q[i];
+      vif.drv_cb.wlast  <= last;
+      vif.drv_cb.wvalid <= 1;
 
-    vif.drv_cb.wid    <= tr.id;
-    vif.drv_cb.wdata  <= tr.wdata_q[i];
-    vif.drv_cb.wstrb  <= tr.wstrb_q[i];
-    vif.drv_cb.wlast  <= last;
-    vif.drv_cb.wvalid <= 1;
-
-    do @(posedge vif.clk); while (!(vif.resetn && vif.wvalid && vif.wready));
+      do @(vif.drv_cb);
+      while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.wvalid && vif.drv_cb.wready));
+    end
     vif.drv_cb.wvalid <= 0;
-  end
+    vif.drv_cb.wlast  <= 0;
 
-  // Wait for B handshake
-  do @(posedge vif.clk); while (!(vif.resetn && vif.bvalid && vif.bready));
-  tr.got_bid   = vif.bid;
-  tr.got_bresp = vif.bresp;
-endtask
+    // B handshake
+    do @(vif.drv_cb);
+    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.bvalid && vif.drv_cb.bready));
+    tr.got_bid   = vif.drv_cb.bid;
+    tr.got_bresp = vif.drv_cb.bresp;
+  endtask
 
   // -------------------------
   // Read transaction
@@ -141,8 +170,8 @@ endtask
     vif.drv_cb.arsize  <= tr.size;
     vif.drv_cb.arburst <= tr.burst;
     vif.drv_cb.arvalid <= 1;
-
-    do @(vif.drv_cb); while (!vif.drv_cb.arready || !vif.drv_cb.resetn);
+    do @(vif.drv_cb);
+    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.arvalid && vif.drv_cb.arready));
     vif.drv_cb.arvalid <= 0;
 
     // R beats (collect until RLAST seen on handshake)
@@ -151,9 +180,9 @@ endtask
     tr.got_rresp_q.delete();
     tr.got_rlast_q.delete();
 
-    for (int unsigned i=0; i<beats; i++) begin
-      // wait handshake (rvalid && rready)
-      do @(vif.drv_cb); while (!(vif.drv_cb.rvalid && vif.drv_cb.rready) || !vif.drv_cb.resetn);
+    for (int unsigned i = 0; i < beats; i++) begin
+      do @(vif.drv_cb);
+      while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.rvalid && vif.drv_cb.rready));
       tr.got_rid_q.push_back(vif.drv_cb.rid);
       tr.got_rdata_q.push_back(vif.drv_cb.rdata);
       tr.got_rresp_q.push_back(vif.drv_cb.rresp);
