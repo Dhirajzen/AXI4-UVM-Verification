@@ -29,6 +29,8 @@ class axi_driver extends uvm_driver #(axi_item);
 
     forever begin
       seq_item_port.get_next_item(tr);
+      `uvm_info("AXI_DRV_DBG", $sformatf("got item dir=%s addr=0x%0h len=%0d",
+                tr.dir.name(), tr.addr, tr.len), UVM_LOW)
 
       // Run the transfer, but abort it cleanly if reset asserts mid-flight —
       // otherwise the BFM would wait forever for a handshake the freshly
@@ -132,6 +134,7 @@ class axi_driver extends uvm_driver #(axi_item);
     do @(vif.drv_cb);
     while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awready));
     vif.drv_cb.awvalid <= 0;
+    `uvm_info("AXI_DRV_DBG", "AW handshake done", UVM_LOW)
 
     // W beats (back-to-back: WVALID stays high between beats)
     for (int unsigned i = 0; i < send_beats; i++) begin
@@ -146,6 +149,7 @@ class axi_driver extends uvm_driver #(axi_item);
 
       do @(vif.drv_cb);
       while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.wready));
+      `uvm_info("AXI_DRV_DBG", $sformatf("W beat %0d done", i), UVM_LOW)
     end
     vif.drv_cb.wvalid <= 0;
     vif.drv_cb.wlast  <= 0;
@@ -155,6 +159,7 @@ class axi_driver extends uvm_driver #(axi_item);
     while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.bvalid && vif.drv_cb.bready));
     tr.got_bid   = vif.drv_cb.bid;
     tr.got_bresp = vif.drv_cb.bresp;
+    `uvm_info("AXI_DRV_DBG", $sformatf("B handshake done bresp=%0b", tr.got_bresp), UVM_LOW)
   endtask
 
   // -------------------------
@@ -174,6 +179,7 @@ class axi_driver extends uvm_driver #(axi_item);
     do @(vif.drv_cb);
     while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.arready));
     vif.drv_cb.arvalid <= 0;
+    `uvm_info("AXI_DRV_DBG", "AR handshake done", UVM_LOW)
 
     // R beats (collect until RLAST seen on handshake)
     tr.got_rid_q.delete();
@@ -188,6 +194,8 @@ class axi_driver extends uvm_driver #(axi_item);
       tr.got_rdata_q.push_back(vif.drv_cb.rdata);
       tr.got_rresp_q.push_back(vif.drv_cb.rresp);
       tr.got_rlast_q.push_back(vif.drv_cb.rlast);
+      `uvm_info("AXI_DRV_DBG", $sformatf("R beat %0d done data=0x%08h rlast=%0b",
+                i, vif.drv_cb.rdata, vif.drv_cb.rlast), UVM_LOW)
       if (vif.drv_cb.rlast) break;
     end
   endtask
