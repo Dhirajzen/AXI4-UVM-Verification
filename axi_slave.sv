@@ -48,10 +48,10 @@ module axi_slave #(
   // ------------------------------------------------------------
   // Memory (byte-addressable)
   // ------------------------------------------------------------
+  // Cleared from the write-path always_ff's reset branch below, not a
+  // separate initial block: SystemVerilog forbids any other procedural
+  // block from writing a variable that an always_ff already drives.
   logic [7:0] mem [0:MEM_BYTES-1];
-  initial begin
-    for (int i = 0; i < MEM_BYTES; i++) mem[i] = 8'h0C;
-  end
 
   // ------------------------------------------------------------
   // Helpers
@@ -172,6 +172,8 @@ module axi_slave #(
 
   always_ff @(posedge clk or negedge resetn) begin
     if (!resetn) begin
+      for (int i = 0; i < MEM_BYTES; i++) mem[i] <= 8'h0C;
+
       wr_state      <= WR_IDLE;
       wr_addr       <= '0;
       wr_start_addr <= '0;
