@@ -92,24 +92,30 @@ interface axi_if (input logic clk);
   // -------------------------
   // Key protocol assertions
   // -------------------------
-  // 1) Payload stable while stalled (VALID=1, READY=0)
+  // 1) Payload stable while stalled (VALID=1, READY=0).
+  // |=> (forward, non-overlapped) checks the CYCLE AFTER a stall against the
+  // stall itself. The earlier |-> $stable(...) compared against the PRIOR
+  // cycle instead, which false-fires whenever a channel's payload legitimately
+  // changes on the very first cycle a *new*, unrelated transfer happens to
+  // stall (fresh data at cycle N compared against the previous transfer's
+  // different data at cycle N-1, not a real held-payload violation).
   property p_stable_aw;
     @(posedge clk) disable iff (!resetn)
-      (awvalid && !awready) |-> $stable({awid,awlen,awsize,awaddr,awburst});
+      (awvalid && !awready) |=> (awvalid && $stable({awid,awlen,awsize,awaddr,awburst}));
   endproperty
   a_stable_aw: assert property (p_stable_aw)
     else $error("AXI-SVA: AW payload changed while AWVALID stalled");
 
   property p_stable_w;
     @(posedge clk) disable iff (!resetn)
-      (wvalid && !wready) |-> $stable({wid,wdata,wstrb,wlast});
+      (wvalid && !wready) |=> (wvalid && $stable({wid,wdata,wstrb,wlast}));
   endproperty
   a_stable_w: assert property (p_stable_w)
     else $error("AXI-SVA: W payload changed while WVALID stalled");
 
   property p_stable_ar;
     @(posedge clk) disable iff (!resetn)
-      (arvalid && !arready) |-> $stable({arid,araddr,arlen,arsize,arburst});
+      (arvalid && !arready) |=> (arvalid && $stable({arid,araddr,arlen,arsize,arburst}));
   endproperty
   a_stable_ar: assert property (p_stable_ar)
     else $error("AXI-SVA: AR payload changed while ARVALID stalled");
@@ -117,7 +123,7 @@ interface axi_if (input logic clk);
   // DUT must hold B payload stable while BVALID && !BREADY
   property p_stable_b;
     @(posedge clk) disable iff (!resetn)
-      (bvalid && !bready) |-> $stable({bid,bresp});
+      (bvalid && !bready) |=> (bvalid && $stable({bid,bresp}));
   endproperty
   a_stable_b: assert property (p_stable_b)
     else $error("AXI-SVA: B payload changed while BVALID stalled");
@@ -125,7 +131,7 @@ interface axi_if (input logic clk);
   // DUT must hold R payload stable while RVALID && !RREADY
   property p_stable_r;
     @(posedge clk) disable iff (!resetn)
-      (rvalid && !rready) |-> $stable({rid,rdata,rresp,rlast});
+      (rvalid && !rready) |=> (rvalid && $stable({rid,rdata,rresp,rlast}));
   endproperty
   a_stable_r: assert property (p_stable_r)
     else $error("AXI-SVA: R payload changed while RVALID stalled");
