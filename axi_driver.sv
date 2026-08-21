@@ -131,8 +131,18 @@ class axi_driver extends uvm_driver #(axi_item);
     vif.drv_cb.awsize  <= tr.size;
     vif.drv_cb.awburst <= tr.burst;
     vif.drv_cb.awvalid <= 1;
-    do @(vif.drv_cb);
-    while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awready));
+    begin : aw_wait
+      int unsigned n;
+      n = 0;
+      do begin
+        @(vif.drv_cb);
+        if (n < 20)
+          `uvm_info("AXI_DRV_DBG", $sformatf(
+            "AW wait n=%0d t=%0t resetn=%0b awready=%0b",
+            n, $time, vif.drv_cb.resetn, vif.drv_cb.awready), UVM_LOW)
+        n++;
+      end while (!(vif.drv_cb.resetn === 1'b1 && vif.drv_cb.awready));
+    end
     vif.drv_cb.awvalid <= 0;
     `uvm_info("AXI_DRV_DBG", "AW handshake done", UVM_LOW)
 
