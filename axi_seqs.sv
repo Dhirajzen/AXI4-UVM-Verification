@@ -209,6 +209,23 @@ class axi_err_seq extends axi_base_seq;
     s = axi_directed_seq::type_id::create("err_wr_lastbeat");
     s.dir = AXI_WRITE; s.addr = 32'h0000_0074; s.len = 3; s.size = 2;
     s.start(m_sequencer);
+
+    // 7) Illegal SIZE on a WRITE (case 3 only ever exercised this on a
+    //    read) -> DECERR. Closes AWSIZE/wr_size toggle coverage, which
+    //    otherwise never sees the illegal-size bit pattern.
+    s = axi_directed_seq::type_id::create("err_wr_size");
+    s.dir = AXI_WRITE; s.addr = 32'h0; s.len = 1; s.size = 3'd5;
+    s.start(m_sequencer);
+
+    // 8) Single beat that STARTS in range but its own extent runs past
+    //    the end of memory (0x7E + 4 bytes = 0x82) -> DECERR from beat 0
+    //    directly, no mid-burst staleness involved. Every other illegal
+    //    case here lands exactly on a beat boundary (addr_ok's first
+    //    check, "addr >= MEM_BYTES"); this is the only one that exercises
+    //    addr_ok's second check ("addr + nbytes - 1 >= MEM_BYTES").
+    s = axi_directed_seq::type_id::create("err_rd_straddle");
+    s.dir = AXI_READ; s.addr = 32'h0000_007E; s.len = 0; s.size = 2;
+    s.start(m_sequencer);
   endtask
 endclass
 
