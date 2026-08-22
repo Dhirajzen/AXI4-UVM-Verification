@@ -64,43 +64,90 @@ No Xcelium? Questa/VCS command lines are at the bottom of the `Makefile`.
 
 ## Bugs found
 
-The RTL is intentionally left unfixed so each bug can be reproduced live.
-All three were found by tightening the scoreboard to predict *exact* per-beat
-responses and adding directed error-injection sequences.
+The RTL is intentionally left unfixed so each bug can be reproduced live. All
+three were found by tightening the scoreboard to predict *exact* per-beat
+responses and adding directed error-injection sequences, then confirmed on
+real hardware (Cadence Xcelium 26.03). Log excerpts below are copy-pasted
+from actual `make bugs` output, not predicted from static analysis.
 
 ### Bug #1 — Error response one beat late (stale flag read after NBA write)
-`axi_slave.sv` read path (~line 339) and write path (~line 237): `rd_err` /
-`wr_err` are set with a **non-blocking assignment and read in the same clock**,
-so the response logic sees the *previous* value.
-- Read burst crossing the end of memory (`0x78`, len 3, size 4B): beat 2 hits
-  address `0x80` (out of range) but returns **RRESP=OKAY with RDATA=0**;
-  DECERR only appears on beat 3.
-- Write burst whose *final* beat is the first illegal one (`0x74`, len 3):
-  **BRESP=OKAY** for a burst that partially ran off memory.
-- Reproduce: `make errors` → log shows `RRESP mismatch beat2 exp=DECERR got=00`
-  and `BRESP mismatch exp=DECERR got=00`.
+`axi_slave.sv` write path (`wr_err` set: lines 224/228/233, read back: line
+239) and read path (`rd_err` set: line 342, read back: line 345): the error
+flag is set with a **non-blocking assignment and read in the same always_ff
+evaluation**, so the response logic sees the *previous* value, not the one
+just computed.
+- Read burst crossing the end of memory (`0x78`, len 3, size 4B, INCR): beat 2
+  hits address `0x80` (out of range) but returns RRESP=OKAY; DECERR only
+  appears one beat later.
+- Write burst whose *final* beat is the first illegal one (`0x74`, len 3,
+  INCR): BRESP=OKAY for a burst that ran off memory.
+- Reproduce: `make errors` (or `axi_error_test`) →
+  ```
+  UVM_ERROR axi_scoreboard.sv(119) [AXI_SCB] RRESP mismatch beat2 exp=DECERR got=0 (addr=0x80 len=3 size=2 burst=AXI_BURST_INCR)
+  UVM_ERROR axi_scoreboard.sv(77)  [AXI_SCB] BRESP mismatch exp=DECERR got=0 (addr=0x74 len=3 size=2 burst=AXI_BURST_INCR wid_mm=0 wlast_mm=0)
+  ```
+  Only 2 of the test's 6 directed illegal cases fail — the other 4 are
+  illegal from beat 0, whose response is computed inline at the AW/AR-accept
+  cycle (not through the buggy stale-read path), so they correctly return
+  DECERR immediately. Only a burst that turns illegal *mid-burst* exposes
+  this bug, which is exactly what cases 5/6 are built to do.
 - Fix direction: compute the error condition combinationally for the current
-  beat (or register response one cycle later), never read an NBA-updated flag
-  in the same block.
+  beat (or register the response one cycle later), never read an NBA-updated
+  flag in the same block that wrote it.
 
 ### Bug #2 — Write FSM deadlocks on early WLAST
-`axi_slave.sv` WR_DATA state (~line 231): an early `WLAST` only sets `wr_err`;
-the FSM still waits for the full `AWLEN+1` beat count. A master that (illegally
-or due to its own bug) ends the burst early hangs the whole write channel
-forever — no `BVALID`, no recovery, bus locked.
-- Reproduce: `make early_wlast` → `BUG2_HANG` error from the test watchdog
-  (plus the scoreboard's zero-transaction guard).
+`axi_slave.sv` W-beat handling (lines 233–244): an early `WLAST` (line 233)
+only sets `wr_err`; the surrounding `if (last_expected) ... else ...` (lines
+236–244) still waits for the beat counter to reach `AWLEN+1` regardless, so
+the FSM never shortcuts to `WR_RESP`. A master that ends the burst early
+hangs the whole write channel forever — no `BVALID`, no recovery, bus locked.
+- Reproduce: `make early_wlast` (or `axi_early_wlast_test`) →
+  ```
+  UVM_ERROR axi_tests.sv(208) [BUG2_HANG] DUT hung after early WLAST: write FSM ignored WLAST and never returned BRESP (axi_slave.sv WR_DATA state)
+  UVM_ERROR axi_scoreboard.sv(151) [AXI_SCB] No transactions observed - the test drove nothing; a silent pass is not a pass
+  ```
+  The first error is the test's own 20µs watchdog firing (the DUT genuinely
+  never responds); the second is the scoreboard's separate zero-transaction
+  guard, correctly refusing to call a burst that never completed a "pass."
 - Fix direction: treat `WLAST` as the burst terminator — on early WLAST, go to
-  WR_RESP immediately with an error response.
+  `WR_RESP` immediately with an error response instead of waiting for the
+  declared beat count.
 
 ### Bug #3 — Errored burst still committed to memory
-`axi_slave.sv` W-beat handling (~line 222): a `WID`≠`AWID` beat sets `wr_err`
-(and B correctly returns DECERR), but the beat data **is still written to
-memory** — the error path has a side effect the response says didn't happen.
-- Reproduce: `make wid` → the readback shows `RDATA mismatch` on all 4 beats
-  (DUT returns the "rejected" data, reference model kept the old contents).
-- Fix direction: qualify `mem_write` with the accumulated error, or buffer the
-  burst and commit only on a clean OKAY.
+`axi_slave.sv` W-beat handling (line 224 sets `wr_err` on `WID`≠`AWID`; line
+227's legality check — which gates `mem_write` at line 230 — never looks at
+the WID check at all): B correctly returns DECERR, but the beat's data is
+**still written to memory**, because `mem_write` is only gated by the
+per-beat size/burst/address check, not by the WID mismatch that also
+happened this beat.
+- Reproduce: `make wid` (or `axi_wid_test`) →
+  ```
+  UVM_ERROR axi_scoreboard.sv(126) [AXI_SCB] RDATA mismatch beat0 addr=0x40 exp=0x0c0c0c0c got=0xc1d00000
+  UVM_ERROR axi_scoreboard.sv(126) [AXI_SCB] RDATA mismatch beat1 addr=0x44 exp=0x0c0c0c0c got=0xc1d00001
+  UVM_ERROR axi_scoreboard.sv(126) [AXI_SCB] RDATA mismatch beat2 addr=0x48 exp=0x0c0c0c0c got=0xc1d00002
+  UVM_ERROR axi_scoreboard.sv(126) [AXI_SCB] RDATA mismatch beat3 addr=0x4c exp=0x0c0c0c0c got=0xc1d00003
+  ```
+  `exp=0x0c0c0c0c` is the untouched reset-fill value the reference model
+  correctly kept (it predicted the whole burst should be rejected); `got=`
+  is the "rejected" write data the DUT committed anyway.
+- Fix direction: qualify `mem_write` with the accumulated per-beat error
+  (including the WID check), or buffer the burst and commit only once the
+  whole burst is confirmed clean.
+
+### Also found: the same commit-on-error behavior via unaligned WRAP addressing
+Independently of Bug #3's WID trigger, `axi_rand_seq`'s constrained-random
+WRAP bursts originally exposed the identical DUT behavior through a different
+path: a WRAP burst with an unaligned start address has its first beat (driven
+verbatim, before any wrap-around correction applies) spill past the wrap
+window's own edge, going out of range while later beats — legal again after
+wrapping — still get individually committed to memory despite the burst
+overall reporting DECERR. This produced cascading `RDATA mismatch` errors in
+`axi_random_test` at addresses an earlier, partially-illegal burst had
+touched. Fixed in the stimulus (WRAP bursts now constrained to
+`addr % (1<<size) == 0`, matching AXI's own alignment requirement for WRAP)
+since `axi_random_test` is meant to stay in the legal-stimulus space —
+`axi_wid_test` remains the dedicated, intentional reproduction of this DUT
+behavior.
 
 Also documented (not flagged by the scoreboard, since the reference model
 mirrors the RTL): the WRAP boundary math accepts any `LEN`, while the AXI spec
@@ -119,5 +166,30 @@ only allows WRAP lengths of 2/4/8/16 with an aligned start address.
   length, address alignment, WSTRB shape (full/partial/zero), OKAY vs DECERR
   responses; per-run summary printed in `report_phase`, full reports via
   `make cov` + IMC.
+
+### Measured results (Xcelium, merged coverage)
+
+Coverage databases from `axi_random_test`, `axi_error_test`, `axi_wid_test`,
+and `axi_early_wlast_test` merged in IMC:
+
+- **Functional coverage: 100%** (90/90 bins), including the direction × burst
+  × size × length-group cross (54/54) closing in a single 400-op random run.
+  `resp_cp`'s DECERR bin only closes once the directed bug tests are merged
+  in — `axi_random_test` alone can't reach it, since it deliberately stays in
+  the legal-stimulus space.
+- **DUT (`axi_slave`) code coverage: ~80%** block/expression/toggle, up from
+  ~70% with `axi_random_test` alone — the directed tests close RTL paths
+  (illegal SIZE, reserved burst, WID mismatch) pure random stimulus
+  structurally can't reach on its own.
+- **Assertion coverage: 8/14 (57%), and it doesn't move**. Every response-
+  channel assertion (`a_stable_r/b`, `a_hold_r/b`) fires and passes across
+  every test that exercises backpressure. Every request-channel assertion
+  (`a_stable_aw/w/ar`, `a_hold_aw/w/ar`) sits at a flat 0% — never triggered,
+  even after merging in the bug-hunting tests. That's not a stimulus gap: this
+  DUT's `awready`/`wready`/`arready` are combinational on FSM idle state and
+  accept almost instantly, so nothing in the master's control ever holds a
+  request-channel VALID against a stalled READY for more than an instant.
+  Documented here rather than "fixed," since manufacturing an artificial
+  request-side stall isn't meaningful without a DUT change.
 
 See `docs/verification_plan.md` for the feature → test → coverage mapping.
